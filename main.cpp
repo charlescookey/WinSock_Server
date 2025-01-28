@@ -8,6 +8,7 @@
 #include <thread>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 
 const char delimiter = '\x1F';
 
@@ -15,7 +16,7 @@ const char delimiter = '\x1F';
 
 
 
-std::queue<std::string> messageQueue;
+std::queue<std::pair<std::string, SOCKET>> messageQueue;
 std::mutex queueMutex;
 std::vector<SOCKET> sockets{};
 
@@ -27,10 +28,10 @@ void chat(SOCKET client_socket) {
         int bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
         if (bytes_received > 0) {
             buffer[bytes_received] = '\0';
-            std::cout << "Received: " << buffer << std::endl;
+            std::cout << "Received: " << buffer << " ***from "<<client_socket<<std::endl;
             {
                 std::lock_guard<std::mutex> lock(queueMutex);
-                messageQueue.push(std::string(buffer));
+                messageQueue.push({ std::string(buffer), client_socket });
             }
         }
     }
@@ -38,8 +39,29 @@ void chat(SOCKET client_socket) {
     closesocket(client_socket);
 }
 
+void parsePrivateMessage(std::string message, SOCKET sender, std::unordered_map<std::string, SOCKET>& socketIDs) {
+    std::vector<std::string> parts;
+    std::stringstream ss(message);
+    std::string temp;
+    while (std::getline(ss, temp, delimiter)) {
+        if (temp.empty())continue;
+        parts.push_back(temp);
+    }
 
-void parsePrivateMessage(std::string message, std::unordered_map<std::string, SOCKET>& socketIDs) {
+    SOCKET reciever = socketIDs[parts[0]];
+    message = std::string("3") + delimiter + parts[1] + delimiter + parts[2];
+    send(reciever, message.c_str(), static_cast<int>(message.size()), 0);
+
+    std::cout << "Sent \"" << message << "\" to client: " << reciever << "\n";
+    
+    
+    message = std::string("3") + delimiter + parts[0] + delimiter + parts[2];
+    send(sender, message.c_str(), static_cast<int>(message.size()), 0);
+
+    std::cout << "Sent \"" << message << "\" to client: " << sender << "\n";
+}
+
+void oldparsePrivateMessage(std::string message, std::unordered_map<std::string, SOCKET>& socketIDs) {
     std::string reciever;
 
     size_t start = 0;
@@ -66,12 +88,13 @@ void sendGroupMessage(std::string message, std::vector<SOCKET> sockets) {
     sendtoAllSockets(message, sockets);
 }
 
-void sendUserList(std::string message, std::string& Userlist, std::vector<SOCKET> sockets) {
+void sendUserList(std::string message, SOCKET sender, std::string& Userlist, std::vector<SOCKET> sockets, std::unordered_map<std::string, SOCKET>& socketIDs) {
+    socketIDs[message] = sender;
     Userlist += delimiter + message;
     sendtoAllSockets(Userlist, sockets);
 }
 
-void parseServerMessage(std::string message, std::string& Userlist, std::unordered_map<std::string, SOCKET>& socketIDs, std::vector<SOCKET> sockets) {
+void parseServerMessage(std::string message, SOCKET sender, std::string& Userlist, std::unordered_map<std::string, SOCKET>& socketIDs, std::vector<SOCKET> sockets) {
     std::string temp;
 
     size_t start = 0;
@@ -85,13 +108,13 @@ void parseServerMessage(std::string message, std::string& Userlist, std::unorder
 
     switch (type) {
     case 1:
-        sendUserList(temp, Userlist, sockets);
+        sendUserList(temp,sender, Userlist, sockets, socketIDs);
         break;
     case 2:
         sendGroupMessage(temp, sockets);
         break;
     case 3:
-        parsePrivateMessage(temp, socketIDs);
+        parsePrivateMessage(temp, sender, socketIDs);
         break;
     default:
         break;
@@ -102,14 +125,14 @@ void serverThread() {
     std::string Userlist{ "1" };
     std::unordered_map<std::string, SOCKET> socketIDs{};
     
-
     while (true) {
         // Process messages
         while (!messageQueue.empty()) {
-            std::string message = messageQueue.front();
+            std::pair<std::string, SOCKET> temp;
+            temp = messageQueue.front();
             messageQueue.pop();
-            std::cout << "Message received: " << message << std::endl;
-            parseServerMessage(message, Userlist, socketIDs, sockets);
+            std::cout << "Message received: " << temp.first << std::endl;
+            parseServerMessage(temp.first,temp.second, Userlist, socketIDs, sockets);
         }
     }
 }
