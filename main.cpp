@@ -14,7 +14,7 @@ const char delimiter = '\x1F';
 
 #pragma comment(lib, "Ws2_32.lib")
 
-std::queue<std::pair<std::string, SOCKET>> messageQueue;
+std::queue<std::pair<std::string, SOCKET>> messageQueue{};
 std::mutex queueMutex;
 std::vector<SOCKET> sockets{};
 
@@ -178,7 +178,7 @@ void parseServerMessage(std::string message, SOCKET sender, std::vector<std::str
         break;
     }
 }
-
+std::mutex serverMutex;
 void serverThread() {
     std::string Userlist{ "1" };
     std::vector<std::string> UserVector{};
@@ -187,11 +187,15 @@ void serverThread() {
     while (true) {
         // Process messages
         while (!messageQueue.empty()) {
-            std::pair<std::string, SOCKET> temp;
-            temp = messageQueue.front();
-            messageQueue.pop();
-            std::cout << "Message received: " << temp.first << std::endl;
-            parseServerMessage(temp.first,temp.second, UserVector, socketIDs, sockets);
+            {
+                std::lock_guard<std::mutex> lock(serverMutex);
+                std::pair<std::string, SOCKET> temp;
+                if (messageQueue.size() == 0)continue;
+                temp = messageQueue.front();
+                messageQueue.pop();
+                std::cout << "Message received: " << temp.first << std::endl;
+                parseServerMessage(temp.first,temp.second, UserVector, socketIDs, sockets);
+            }
         }
     }
 }
