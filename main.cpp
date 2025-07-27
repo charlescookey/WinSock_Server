@@ -238,7 +238,7 @@ int server_loop() {
     }
 
     std::cout << "Server is listening on port 65432..." << std::endl;
-
+    while (!messageQueue.empty())messageQueue.pop();
     std::thread* receivingThread = new std::thread(serverThread);
 
 
